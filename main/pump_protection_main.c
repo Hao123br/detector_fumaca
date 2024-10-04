@@ -539,8 +539,15 @@ void app_main(void)
         //Convert adc_reading to voltage in mV
         uint32_t reference_ldr_voltage = esp_adc_cal_raw_to_voltage(reference_ldr_reading, adc_chars);
         uint32_t sense_ldr_voltage = esp_adc_cal_raw_to_voltage(sense_ldr_reading, adc_chars);
-        printf("Reference | Raw: %d\tVoltage: %dmV\n", reference_ldr_reading, reference_ldr_voltage);
-        printf("Sense     | Raw: %d\tVoltage: %dmV\n", sense_ldr_reading, sense_ldr_voltage);
+		char* fmt_str = "\
+			Reference | Raw: %d\tVoltage: %dmV\n\
+			Sense     | Raw: %d\tVoltage: %dmV\n\n";
+		printf(fmt_str,
+			reference_ldr_reading, reference_ldr_voltage,
+			sense_ldr_reading, sense_ldr_voltage);
+		str_size = sprintf(log_str, fmt_str,
+			reference_ldr_reading, reference_ldr_voltage,
+			sense_ldr_reading, sense_ldr_voltage);
 
 		socket_send(log_str, str_size);
 		mqtt_publisher_qos("esp32", log_str, 0);

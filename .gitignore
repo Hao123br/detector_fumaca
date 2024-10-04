@@ -1,0 +1,5 @@
+.cache/
+build/
+sdkconfig.old
+*.swp
+server_certs/ca_key.pem

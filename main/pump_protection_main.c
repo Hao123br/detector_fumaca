@@ -71,7 +71,7 @@ static const char *SOCK_TAG = "server";
 static const char *OTA_TAG = "ota";
 
 // ADC parameters 
-static const uint8_t width = 11;
+static const adc_bits_width_t width = ADC_WIDTH_BIT_11;
 static const adc_atten_t atten = ADC_ATTEN_DB_6;
 static const uint8_t reference_ldr_channel = 4;
 static const uint8_t sense_ldr_channel = 5;

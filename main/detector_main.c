@@ -83,8 +83,6 @@ static const uint16_t listen_port = 42032;
 static const uint16_t rx_ring_size = 256;
 static const uint16_t tx_ring_size = 8192;
 
-TaskHandle_t status_led_handle = NULL;
-
 // default firmware update url
 static const char *ota_url = "https://betahalo.ddns.net:42024/build/pump-protection.bin";
 
@@ -350,7 +348,7 @@ CLEAN_UP:
     vTaskDelete(NULL);
 }
 
-static void blink_led()
+static void status_led_task(void* arg)
 {
 	while(1) {
         /* Blink on (output high) */
@@ -362,9 +360,28 @@ static void blink_led()
 	}
 }
 
-static void status_led_task(void* arg)
+static void blink_led(bool start)
 {
-	blink_led();
+	static bool started = false;
+	static TaskHandle_t status_led_handle = NULL;
+
+	if(started == start)
+		return;
+
+	if(start)
+	{
+		//start blinking the status led
+		xTaskCreate(status_led_task, "led_task", 1024, NULL, 5, &status_led_handle);
+		started = true;
+	}
+	else
+	{
+		//stop blinking the status led
+		vTaskDelete(status_led_handle);
+		//and turn it off
+		gpio_set_level(STATUS_LED_GPIO, 0);
+		started = false;
+	}
 }
 
 void ota_task(void *pvParameter) {
@@ -380,21 +397,17 @@ void ota_task(void *pvParameter) {
 		.keep_alive_enable = true,
 	};
 
-	//start blinking the status led
-	xTaskCreate(status_led_task, "led_task", 1024, NULL, 5, &status_led_handle);
+	blink_led(true);
 	//download the new firmware
 	esp_err_t ret = esp_https_ota(&config);
-	//stop blinking the status led
-	vTaskDelete(status_led_handle);
+	blink_led(false);
 	if (ret == ESP_OK) {
-		//and turn it on
+		//turn status led on
 		gpio_set_level(STATUS_LED_GPIO, 1);
 		restart_pending = true;
 		socket_send(success_msg, strlen(success_msg));
 		mqtt_publisher("esp32", success_msg);
 	} else {
-		//and turn it off
-		gpio_set_level(STATUS_LED_GPIO, 0);
 		ESP_LOGE(OTA_TAG, "Firmware upgrade failed");
 		socket_send(error_msg, strlen(error_msg));
 		mqtt_publisher("esp32", error_msg);
@@ -452,6 +465,17 @@ static void parse_command(char *command_str, size_t str_size, char *mode) {
 	} else if (strstr(command_str, "version") != NULL) {
 		send_version();
 	}
+}
+
+//TODO add hysteresis
+//TODO add calibration
+static bool check_smoke(int16_t ref_reading, int16_t sense_reading)
+{
+	static const int16_t threshold = 100;
+	int16_t diff = sense_reading - ref_reading;
+	//valor absoluto
+	diff = diff>0 ? diff : -1*diff;
+	return (diff > threshold);
 }
 
 void app_main(void)
@@ -537,8 +561,9 @@ void app_main(void)
         reference_ldr_reading /= NO_OF_SAMPLES;
         sense_ldr_reading /= NO_OF_SAMPLES;
         //Convert adc_reading to voltage in mV
-        uint32_t reference_ldr_voltage = esp_adc_cal_raw_to_voltage(reference_ldr_reading, adc_chars);
-        uint32_t sense_ldr_voltage = esp_adc_cal_raw_to_voltage(sense_ldr_reading, adc_chars);
+        uint16_t reference_ldr_voltage = esp_adc_cal_raw_to_voltage(reference_ldr_reading, adc_chars);
+        uint16_t sense_ldr_voltage = esp_adc_cal_raw_to_voltage(sense_ldr_reading, adc_chars);
+
 		char* fmt_str = "\
 			Reference | Raw: %d\tVoltage: %dmV\n\
 			Sense     | Raw: %d\tVoltage: %dmV\n\n";
@@ -548,8 +573,19 @@ void app_main(void)
 		str_size = sprintf(log_str, fmt_str,
 			reference_ldr_reading, reference_ldr_voltage,
 			sense_ldr_reading, sense_ldr_voltage);
-
 		socket_send(log_str, str_size);
 		mqtt_publisher_qos("esp32", log_str, 0);
+
+		if(check_smoke(reference_ldr_voltage, sense_ldr_voltage)) {
+			blink_led(true);
+			//activate buzzer
+			gpio_set_level(BUZZER_GPIO, 1);
+			mqtt_publisher_qos("esp32", "alarm on", 2);
+		} else {
+			blink_led(false);
+			//deactivate buzzer
+			gpio_set_level(BUZZER_GPIO, 0);
+			mqtt_publisher_qos("esp32", "alarm off", 2);
+		}
 	}
 }
